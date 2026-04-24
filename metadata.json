@@ -1,6 +1,6 @@
 {
-  "name": "3D Scan PWA",
-  "description": "Mobile-first 3D object and room reconstruction with guided capture and cloud photogrammetry.",
+  "name": "RECON",
+  "description": "GPU-powered 3D reconstruction engine for real-time object and room scanning.",
   "requestFramePermissions": [
     "camera"
   ],

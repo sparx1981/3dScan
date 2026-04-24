@@ -16,10 +16,30 @@ export const api = {
   },
   
   async uploadPhoto(projectId: string, blob: Blob): Promise<Project> {
-    // In a real app, we'd send the blob. For this demo, we just notify the server.
+    const formData = new FormData();
+    formData.append('image', blob, 'photo.jpg');
+    
     const res = await fetch(`/api/projects/${projectId}/upload`, {
+      method: 'POST',
+      body: formData
+    });
+    return res.json();
+  },
+
+  async finishScan(projectId: string): Promise<Project> {
+    const res = await fetch(`/api/projects/${projectId}/finish`, {
       method: 'POST'
     });
+    
+    if (res.status === 503) {
+      throw new Error('COLAB_OFFLINE');
+    }
+    
+    if (!res.ok) {
+      const errorData = await res.json();
+      throw new Error(errorData.error || 'PROCESSING_FAILED');
+    }
+    
     return res.json();
   }
 };

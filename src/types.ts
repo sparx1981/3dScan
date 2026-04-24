@@ -13,6 +13,8 @@ export interface Project {
   updatedAt: string;
   thumbnailURL?: string;
   faceCount?: number;
+  modelUrl?: string;
+  errorMessage?: string;
 }
 
 export type CaptureMode = 'object' | 'room';

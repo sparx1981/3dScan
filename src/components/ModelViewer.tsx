@@ -1,8 +1,9 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { motion } from 'motion/react';
-import { X, Maximize2, Ruler, Box, Share2, Download, Layers, Zap } from 'lucide-react';
+import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
+import { motion, AnimatePresence } from 'motion/react';
+import { X, Maximize2, Ruler, Box, Share2, Download, Layers, Zap, Loader2 } from 'lucide-react';
 import { Project } from '../types';
 import { cn } from '../lib/utils';
 
@@ -13,6 +14,7 @@ interface ModelViewerProps {
 
 export default function ModelViewer({ project, onClose }: ModelViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -48,16 +50,50 @@ export default function ModelViewer({ project, onClose }: ModelViewerProps) {
     secondaryLight.position.set(-10, -5, -10);
     scene.add(secondaryLight);
 
-    // Mock Geometry
-    const geometry = new THREE.TorusKnotGeometry(1, 0.3, 100, 16);
-    const material = new THREE.MeshStandardMaterial({ 
-      color: 0xffffff,
-      metalness: 0.8,
-      roughness: 0.2,
-      emissive: 0x111111
-    });
-    const mesh = new THREE.Mesh(geometry, material);
-    scene.add(mesh);
+    let modelObject: THREE.Group | THREE.Mesh | null = null;
+
+    if (project.modelUrl) {
+      const loader = new OBJLoader();
+      loader.load(project.modelUrl, (object) => {
+        modelObject = object;
+        
+        // Centre and Scale
+        const box = new THREE.Box3().setFromObject(object);
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3());
+        
+        const maxDim = Math.max(size.x, size.y, size.z);
+        const scale = 3 / maxDim;
+        
+        object.scale.set(scale, scale, scale);
+        object.position.x = -center.x * scale;
+        object.position.y = -center.y * scale;
+        object.position.z = -center.z * scale;
+        
+        scene.add(object);
+        setIsLoading(false);
+      }, undefined, (error) => {
+        console.error("Error loading model", error);
+        setIsLoading(false);
+        // Fallback to torus if load fails
+        const geometry = new THREE.TorusKnotGeometry(1, 0.3, 100, 16);
+        const material = new THREE.MeshStandardMaterial({ color: 0xff4444 });
+        const mesh = new THREE.Mesh(geometry, material);
+        scene.add(mesh);
+      });
+    } else {
+      // Mock Geometry Fallback
+      setIsLoading(false);
+      const geometry = new THREE.TorusKnotGeometry(1, 0.3, 100, 16);
+      const material = new THREE.MeshStandardMaterial({ 
+        color: 0xffffff,
+        metalness: 0.8,
+        roughness: 0.2,
+        emissive: 0x111111
+      });
+      const mesh = new THREE.Mesh(geometry, material);
+      scene.add(mesh);
+    }
 
     const grid = new THREE.GridHelper(20, 20, 0xffffff, 0x333333);
     grid.position.y = -2;
@@ -82,7 +118,6 @@ export default function ModelViewer({ project, onClose }: ModelViewerProps) {
       renderer.setSize(w, h);
     }
 
-    // Wait for container to have size if it's 0 (common in some React lifecycle cases)
     if (width === 0 || height === 0) {
       setTimeout(handleResize, 100);
     }
@@ -92,38 +127,60 @@ export default function ModelViewer({ project, onClose }: ModelViewerProps) {
     return () => {
       window.removeEventListener('resize', handleResize);
       renderer.dispose();
-      geometry.dispose();
-      material.dispose();
       if (containerRef.current?.contains(renderer.domElement)) {
         containerRef.current.removeChild(renderer.domElement);
       }
     };
-  }, []);
+  }, [project.modelUrl]);
+
+  const handleDownload = () => {
+    if (project.modelUrl) {
+      window.open(project.modelUrl, '_blank');
+    }
+  };
 
   return (
     <div className="fixed inset-0 bg-[#0a0a0a] z-50 flex flex-col">
       <header className="px-12 py-8 flex justify-between items-center bg-[#0a0a0a] border-b sophisticated-border absolute top-0 inset-x-0 z-10">
         <div className="flex items-center gap-8">
-          <button onClick={onClose} className="p-2 -ml-2 text-white/40 hover:text-white transition-colors">
+          <button onClick={onClose} className="p-2 -ml-2 text-white/40 hover:text-white transition-colors" id="close-viewer-btn">
             <X size={24} />
           </button>
           <div>
             <h2 className="font-serif italic text-2xl text-white leading-tight">{project.name}</h2>
-            <p className="tracking-ultra text-white/40 mt-0.5">Asset Inspection Protocol</p>
+            <p className="tracking-ultra text-white/40 mt-0.5 uppercase">Asset Inspection Protocol</p>
           </div>
         </div>
         <div className="flex items-center gap-6">
           <button className="text-white/40 hover:text-white transition-all active:scale-95">
             <Share2 size={18} />
           </button>
-          <button className="bg-white text-black px-8 py-2.5 rounded-sm font-bold text-xs uppercase tracking-widest flex items-center gap-2 hover:bg-zinc-200 transition-all active:scale-95 shadow-2xl">
+          <button 
+            onClick={handleDownload}
+            className="bg-white text-black px-8 py-2.5 rounded-sm font-bold text-xs uppercase tracking-widest flex items-center gap-2 hover:bg-zinc-200 transition-all active:scale-95 shadow-2xl"
+          >
             <Download size={14} />
-            <span>Generate Export</span>
+            <span>Download OBJ</span>
           </button>
         </div>
       </header>
 
-      <div ref={containerRef} className="flex-1 w-full h-full" />
+      <div className="relative flex-1 w-full h-full">
+        <AnimatePresence>
+          {isLoading && (
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-[#0a0a0a] gap-4"
+            >
+              <Loader2 className="w-8 h-8 text-white animate-spin" />
+              <p className="text-[10px] uppercase tracking-[0.3em] text-white/40 font-bold">Loading Mesh Data</p>
+            </motion.div>
+          )}
+        </AnimatePresence>
+        <div ref={containerRef} className="w-full h-full" />
+      </div>
 
       <footer className="absolute bottom-12 inset-x-0 flex justify-center pointer-events-none">
         <div className="bg-[#0a0a0a]/80 backdrop-blur-xl border sophisticated-border p-2 flex gap-2 pointer-events-auto shadow-[0_0_50px_rgba(0,0,0,0.5)]">
