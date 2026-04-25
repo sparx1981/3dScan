@@ -144,7 +144,7 @@ async function startServer() {
       const result: any = await processRes.json();
 
       if (result.status === 'complete') {
-        project.modelUrl = result.obj_path;
+     project.modelUrl = result.obj_url;
         project.status = 'complete';
         project.updatedAt = new Date().toISOString();
         
