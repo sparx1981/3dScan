@@ -144,7 +144,8 @@ async function startServer() {
       const result: any = await processRes.json();
 
       if (result.status === 'complete') {
-     project.modelUrl = result.obj_url;
+     project.modelUrl = result.obj_url || result.obj_path;
+console.log("Colab result received:", JSON.stringify(result));
         project.status = 'complete';
         project.updatedAt = new Date().toISOString();
         
