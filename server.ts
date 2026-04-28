@@ -91,6 +91,25 @@ async function startServer() {
     }
   });
 
+
+app.get("/api/debug", (req, res) => {
+  const allProjects = Array.from(projects.values()).map(p => ({
+    id: p.id,
+    name: p.name,
+    status: p.status,
+    photoCount: p.photoCount,
+    modelUrl: p.modelUrl || "NOT SET",
+    errorMessage: p.errorMessage || "none",
+    updatedAt: p.updatedAt
+  }));
+  res.json({
+    colabUrlConfigured: !!process.env.COLAB_NGROK_URL,
+    colabUrl: process.env.COLAB_NGROK_URL || "NOT SET",
+    projects: allProjects
+  });
+});
+
+
   app.post("/api/projects/:id/upload", upload.single('image'), (req, res) => {
     const project = projects.get(req.params.id);
     if (!project) return res.status(404).send("Not found");
@@ -102,18 +121,82 @@ async function startServer() {
   });
 
   app.post("/api/projects/:id/finish", async (req, res) => {
-    const project = projects.get(req.params.id);
-    if (!project) return res.status(404).send("Not found");
+  const project = projects.get(req.params.id);
+  if (!project) return res.status(404).send("Not found");
 
-    const colabUrl = process.env.COLAB_NGROK_URL;
-    if (!colabUrl) {
+  const colabUrl = process.env.COLAB_NGROK_URL;
+  if (!colabUrl) {
+    project.status = 'failed';
+    project.errorMessage = 'Processing engine URL not configured';
+    return res.status(503).json({ error: "3D processing is currently offline." });
+  }
+
+  // Check Colab is online before accepting the job
+  try {
+    const healthRes = await fetch(`${colabUrl}/health`, {
+      signal: AbortSignal.timeout(10000)
+    });
+    if (!healthRes.ok) throw new Error("Offline");
+  } catch {
+    project.status = 'failed';
+    project.errorMessage = 'Processing engine is offline';
+    return res.status(503).json({ error: "3D processing is currently offline. Please check the server." });
+  }
+
+  // Set status to queued and return IMMEDIATELY to the phone
+  // Processing happens in the background
+  project.status = 'queued';
+  project.updatedAt = new Date().toISOString();
+  res.json(project); // Phone gets this response straight away
+
+  // Everything below runs in the background after the phone has its response
+  (async () => {
+    try {
+      project.status = 'processing';
+      project.updatedAt = new Date().toISOString();
+
+      const projectPath = path.join(UPLOAD_ROOT, project.id);
+      const files = fs.readdirSync(projectPath);
+
+      const formData = new FormData();
+      for (const file of files) {
+        const filePath = path.join(projectPath, file);
+        const buffer = fs.readFileSync(filePath);
+        formData.append('images', new Blob([buffer]), file);
+      }
+
+      console.log(`Starting background processing for project ${project.id} with ${files.length} images`);
+
+      const processRes = await fetch(`${colabUrl}/process`, {
+        method: 'POST',
+        body: formData,
+        signal: AbortSignal.timeout(1500000) // 25 minutes
+      });
+
+      const result: any = await processRes.json();
+      console.log("Processing result:", JSON.stringify(result));
+
+      if (result.status === 'complete') {
+        project.modelUrl = result.obj_url || result.obj_path;
+        project.status = 'complete';
+        project.updatedAt = new Date().toISOString();
+        // Clean up uploaded photos
+        fs.rmSync(projectPath, { recursive: true, force: true });
+        console.log(`Project ${project.id} complete. Model: ${project.modelUrl}`);
+      } else {
+        project.status = 'failed';
+        project.errorMessage = result.error || 'Processing failed';
+        console.log(`Project ${project.id} failed: ${project.errorMessage}`);
+      }
+    } catch (err: any) {
+      console.error("Background processing error:", err);
       project.status = 'failed';
-      project.errorMessage = 'Processing engine URL not configured';
-      return res.status(503).json({ error: "3D processing is currently offline. Please start the Colab notebook and try again." });
+      project.errorMessage = err.name === 'TimeoutError'
+        ? 'Processing timed out after 25 minutes'
+        : 'Connection to processing engine lost';
     }
-
-    project.status = 'queued';
-    project.updatedAt = new Date().toISOString();
+  })();
+});
 
     try {
       // Step 1: Check health
